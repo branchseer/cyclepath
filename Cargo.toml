@@ -1,0 +1,13 @@
+[package]
+name = "esloop"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+oxc_allocator = "0.14.0"
+oxc_ast = "0.14.0"
+oxc_diagnostics = "0.14.0"
+oxc_parser = "0.14.0"
+oxc_resolver = "1.8.1"
+oxc_span = "0.14.0"
+rayon = "1.10.0"

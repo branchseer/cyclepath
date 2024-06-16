@@ -8,12 +8,16 @@ use oxc_parser::Parser;
 use oxc_span::GetSpan;
 use oxc_span::{SourceType, Span};
 
-pub fn get_deps<'a>(
+#[derive(Default)]
+pub struct Imports<'a> {
+    pub specifiers: Vec<(&'a str, Span)>,
+    pub non_literal_imports: Vec<Span>,
+}
+
+pub fn parse_imports<'a>(
     allocator: &'a Allocator,
     source: &'a str,
-    on_dep: impl FnMut(&'a str),
-    on_dynamic_import: impl FnMut(Span),
-) -> Result<(), Vec<OxcDiagnostic>> {
+) -> (Imports<'a>, Vec<OxcDiagnostic>) {
     let parser = Parser::new(
         allocator,
         source,
@@ -25,21 +29,21 @@ pub fn get_deps<'a>(
     );
     let parse_return = parser.parse();
     if parse_return.panicked {
-        return Err(parse_return.errors);
+        return (Default::default(), parse_return.errors);
     }
 
-    struct DepVisitor<OnDep, OnDynamicImport> {
-        on_dep: OnDep,
-        on_dynamic_import: OnDynamicImport,
+    #[derive(Default)]
+    struct ImportsVisitor<'a> {
+        specifiers: Vec<(&'a str, Span)>,
+        non_literal_imports: Vec<Span>,
     }
-    impl<'a, OnDep: FnMut(&'a str), OnDynamicImport: FnMut(Span)> Visit<'a>
-        for DepVisitor<OnDep, OnDynamicImport>
-    {
+    impl<'a> Visit<'a> for ImportsVisitor<'a> {
         fn visit_import_declaration(&mut self, decl: &oxc_ast::ast::ImportDeclaration<'a>) {
             if decl.import_kind == ImportOrExportKind::Type {
                 return;
             };
-            (self.on_dep)(decl.source.value.as_str())
+            self.specifiers
+                .push((decl.source.value.as_str(), decl.source.span))
         }
         fn visit_ts_import_equals_declaration(
             &mut self,
@@ -52,14 +56,17 @@ pub fn get_deps<'a>(
                 external_module_reference,
             ) = &decl.module_reference
             {
-                (self.on_dep)(external_module_reference.expression.value.as_str())
+                let specifier_literal = &external_module_reference.expression;
+                self.specifiers
+                    .push((specifier_literal.value.as_str(), specifier_literal.span))
             }
         }
         fn visit_import_expression(&mut self, expr: &oxc_ast::ast::ImportExpression<'a>) {
             if let Expression::StringLiteral(string_literal) = &expr.source {
-                (self.on_dep)(string_literal.value.as_str())
+                self.specifiers
+                    .push((string_literal.value.as_str(), string_literal.span))
             } else {
-                (self.on_dynamic_import)(expr.source.span())
+                self.non_literal_imports.push(expr.source.span())
             }
         }
         fn visit_call_expression(&mut self, expr: &oxc_ast::ast::CallExpression<'a>) {
@@ -74,42 +81,44 @@ pub fn get_deps<'a>(
             }
             let arg = &expr.arguments[0];
             if let Argument::StringLiteral(source) = arg {
-                (self.on_dep)(source.value.as_str());
+                self.specifiers.push((source.value.as_str(), source.span));
             } else {
-                (self.on_dynamic_import)(arg.span());
+                self.non_literal_imports.push(arg.span());
             }
         }
     }
-    walk_program(
-        &mut DepVisitor {
-            on_dep,
-            on_dynamic_import,
+
+    let mut visitor = ImportsVisitor::<'a>::default();
+    walk_program(&mut visitor, &parse_return.program);
+    (
+        Imports {
+            specifiers: visitor.specifiers,
+            non_literal_imports: visitor.non_literal_imports,
         },
-        &parse_return.program,
-    );
-    Ok(())
+        parse_return.errors,
+    )
 }
 
 #[cfg(test)]
 mod tests {
 
-    use super::get_deps;
-    use oxc_diagnostics::OxcDiagnostic;
-    use oxc_span::Span;
+    use super::parse_imports;
+    use oxc_allocator::Allocator;
 
-    fn collect_deps(src: &str) -> Result<(Vec<String>, Vec<Span>), Vec<OxcDiagnostic>> {
-        let mut deps: Vec<String> = vec![];
-        let mut dynamic_import_spans: Vec<Span> = vec![];
-        get_deps(
-            &Default::default(),
-            src,
-            |dep| deps.push(dep.to_owned()),
-            |span| dynamic_import_spans.push(span),
-        )?;
-        Ok((deps, dynamic_import_spans))
-    }
+    // fn collect_deps(src: &str) -> Result<(Vec<String>, Vec<Span>), Vec<OxcDiagnostic>> {
+    //     let mut deps: Vec<String> = vec![];
+    //     let mut dynamic_import_spans: Vec<Span> = vec![];
+    //     parse_imports(
+    //         &Default::default(),
+    //         src,
+    //         |dep| deps.push(dep.to_owned()),
+    //         |span| dynamic_import_spans.push(span),
+    //     )?;
+    //     Ok((deps, dynamic_import_spans))
+    // }
     #[test]
     fn test_get_deps() {
+        let allocator = Allocator::default();
         let src = "import 'foo';
 import a from 'a';
 import type b from 'b';
@@ -120,10 +129,18 @@ const e = import('e' + d);
 const f = require('f');
 const g = require('g' + f);
 ";
-        let (deps, dynamic_import_spans) = collect_deps(src).unwrap();
-        assert_eq!(deps, vec!["foo", "a", "c", "d", "f"]);
+        let imports = parse_imports(&allocator, src).0;
         assert_eq!(
-            dynamic_import_spans
+            imports
+                .specifiers
+                .into_iter()
+                .map(|(s, _)| s)
+                .collect::<Vec<_>>(),
+            vec!["foo", "a", "c", "d", "f"]
+        );
+        assert_eq!(
+            imports
+                .non_literal_imports
                 .into_iter()
                 .map(|span| span.source_text(&src))
                 .collect::<Vec<&str>>(),

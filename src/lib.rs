@@ -1,58 +1,51 @@
-mod dep;
+mod collect_deps;
+mod dep_graph;
+mod hash;
+mod johnson_simple_cycles;
+mod js_resolver;
 
-use std::path::Path;
+use collect_deps::collect_dependencies;
+use js_resolver::JsDiscoverDependency;
+use oxc_resolver::{FileMetadata, FileSystem, ResolveOptions, ResolverGeneric};
 
-use oxc_resolver::{FileSystem, ResolveOptions, ResolverGeneric};
-
-use dep::get_deps;
 use rayon::iter::{ParallelBridge, ParallelIterator};
-use std::sync::mpsc;
+use std::{
+    io,
+    path::{Path, PathBuf},
+    sync::{mpsc, Arc},
+};
 
-pub fn scan<FS: FileSystem>(fs: FS, cwd: &str, entries: &[&str]) {
-    let resolver = ResolverGeneric::<FS>::new_with_file_system(
-        fs,
-        ResolveOptions {
-            extensions: [".jsx", ".js", ".tsx", ".ts"]
-                .into_iter()
-                .map(ToOwned::to_owned)
-                .collect(),
-            ..Default::default()
-        },
-    );
+#[derive(Default, Clone, Debug)]
+pub struct OsFileSystem(());
 
-    let (deps_cx, deps_rx) = mpsc::channel::<(String, Vec<String>)>();
-    let (work_cx, work_rx) = mpsc::channel::<(String, String)>();
-    for entry in entries {
-        work_cx.send((cwd.to_string(), entry.to_string())).unwrap();
+impl FileSystem for OsFileSystem {
+    fn read_to_string(&self, path: &Path) -> io::Result<String> {
+        std::fs::read_to_string(path)
     }
-    rayon::join(
-        || (),
-        || {
-            work_rx
-                .into_iter()
-                .par_bridge()
-                .for_each(|(path, specifier)| {
-                    let resolved_path = resolver.resolve(path, &specifier);
-                })
-        },
-    );
+
+    fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+        std::fs::metadata(path).map(FileMetadata::from)
+    }
+
+    fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+        std::fs::symlink_metadata(path).map(FileMetadata::from)
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        dunce::canonicalize(path)
+    }
 }
 
-#[cfg(test)]
-mod tests {
-    use oxc_resolver::Resolver;
-
-    use super::*;
-
-    #[test]
-    fn it_works() {
-        let resolver = Resolver::new(ResolveOptions {
-            extensions: [".jsx", ".js", ".tsx", ".ts"]
+pub fn get_circles<FS: FileSystem + Clone>(fs: FS, entries: impl Iterator<Item = Arc<Path>>) {
+    let js_discover_dependency = JsDiscoverDependency::new(
+        fs,
+        ResolveOptions {
+            extensions: [".js", ".jsx", ".ts", ".tsx", ".node"]
                 .into_iter()
-                .map(ToOwned::to_owned)
+                .map(String::from)
                 .collect(),
             ..Default::default()
-        });
-        dbg!(resolver.resolve("/Users/patr0nus/code/hello_frontend", "./a"));
-    }
+        },
+    );
+    let result = collect_dependencies(entries, &js_discover_dependency);
 }

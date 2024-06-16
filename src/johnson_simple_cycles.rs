@@ -14,8 +14,7 @@
 
 use std::hash::Hash;
 
-use ahash::RandomState;
-use hashbrown::{HashMap, HashSet};
+use crate::hash::{HashMap, HashSet};
 use indexmap::IndexSet;
 
 use petgraph::algo::kosaraju_scc;
@@ -39,7 +38,8 @@ where
     G::NodeId: Hash + Eq,
 {
     let node_set: HashSet<G::NodeId> = nodes.iter().copied().collect();
-    let mut node_map: HashMap<G::NodeId, NodeIndex> = HashMap::with_capacity(nodes.len());
+    let mut node_map: HashMap<G::NodeId, NodeIndex> =
+        HashMap::with_capacity_and_hasher(nodes.len(), Default::default());
     let node_filter = |node: G::NodeId| -> bool { node_set.contains(&node) };
     // Overallocates edges, but not a big deal as this is temporary for the lifetime of the
     // subgraph
@@ -62,7 +62,7 @@ fn unblock(
     blocked: &mut HashSet<NodeIndex>,
     block: &mut HashMap<NodeIndex, HashSet<NodeIndex>>,
 ) {
-    let mut stack: IndexSet<NodeIndex, RandomState> = IndexSet::with_hasher(RandomState::default());
+    let mut stack: IndexSet<NodeIndex> = IndexSet::default();
     stack.insert(node);
     while let Some(stack_node) = stack.pop() {
         if blocked.remove(&stack_node) {
@@ -77,7 +77,7 @@ fn unblock(
                 // (so no updates to stack) and populate it with an empty
                 // set.
                 None => {
-                    block.insert(stack_node, HashSet::new());
+                    block.insert(stack_node, HashSet::default());
                 }
             }
             blocked.remove(&stack_node);
@@ -88,7 +88,7 @@ fn unblock(
 #[allow(clippy::too_many_arguments)]
 fn process_stack<G: GraphBase>(
     start_node: NodeIndex,
-    stack: &mut Vec<(NodeIndex, IndexSet<NodeIndex, RandomState>)>,
+    stack: &mut Vec<(NodeIndex, IndexSet<NodeIndex>)>,
     path: &mut Vec<NodeIndex>,
     closed: &mut HashSet<NodeIndex>,
     blocked: &mut HashSet<NodeIndex>,
@@ -112,7 +112,7 @@ fn process_stack<G: GraphBase>(
                     next_node,
                     subgraph
                         .neighbors(next_node)
-                        .collect::<IndexSet<NodeIndex, ahash::RandomState>>(),
+                        .collect::<IndexSet<NodeIndex>>(),
                 ));
                 closed.remove(&next_node);
                 blocked.insert(next_node);
@@ -124,7 +124,7 @@ fn process_stack<G: GraphBase>(
                 unblock(*this_node, blocked, block);
             } else {
                 for neighbor in subgraph.neighbors(*this_node) {
-                    let block_neighbor = block.entry(neighbor).or_insert_with(HashSet::new);
+                    let block_neighbor = block.entry(neighbor).or_default();
                     block_neighbor.insert(*this_node);
                 }
             }
@@ -142,7 +142,7 @@ pub struct SimpleCycleIter<G: GraphBase> {
     blocked: HashSet<NodeIndex>,
     closed: HashSet<NodeIndex>,
     block: HashMap<NodeIndex, HashSet<NodeIndex>>,
-    stack: Vec<(NodeIndex, IndexSet<NodeIndex, RandomState>)>,
+    stack: Vec<(NodeIndex, IndexSet<NodeIndex>)>,
     start_node: NodeIndex,
     node_map: HashMap<G::NodeId, NodeIndex>,
     reverse_node_map: HashMap<NodeIndex, G::NodeId>,
@@ -164,13 +164,13 @@ where
         graph,
         scc: strongly_connected_components,
         path: Vec::new(),
-        blocked: HashSet::new(),
-        closed: HashSet::new(),
-        block: HashMap::new(),
+        blocked: HashSet::default(),
+        closed: HashSet::default(),
+        block: HashMap::default(),
         stack: Vec::new(),
         start_node: NodeIndex::new(std::u32::MAX as usize),
-        node_map: HashMap::new(),
-        reverse_node_map: HashMap::new(),
+        node_map: HashMap::default(),
+        reverse_node_map: HashMap::default(),
         subgraph: StableDiGraph::new(),
     }
 }
@@ -188,8 +188,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         // Restore previous state if it exists
-        let mut stack: Vec<(NodeIndex, IndexSet<NodeIndex, ahash::RandomState>)> =
-            std::mem::take(&mut self.stack);
+        let mut stack: Vec<(NodeIndex, IndexSet<NodeIndex>)> = std::mem::take(&mut self.stack);
         let mut path: Vec<NodeIndex> = std::mem::take(&mut self.path);
         let mut closed: HashSet<NodeIndex> = std::mem::take(&mut self.closed);
         let mut blocked: HashSet<NodeIndex> = std::mem::take(&mut self.blocked);
@@ -222,12 +221,10 @@ where
         } else {
             subgraph.remove_node(self.start_node);
             self.scc
-                .extend(kosaraju_scc(&subgraph).into_iter().filter_map(|scc| {
-                    let res = scc
-                        .iter()
+                .extend(kosaraju_scc(&subgraph).into_iter().map(|scc| {
+                    scc.iter()
                         .map(|n| reverse_node_map[n])
-                        .collect::<Vec<G::NodeId>>();
-                    Some(res)
+                        .collect::<Vec<G::NodeId>>()
                 }));
         }
         while let Some(mut scc) = self.scc.pop() {
@@ -240,13 +237,13 @@ where
             path = vec![self.start_node];
             blocked = path.iter().copied().collect();
             // Nodes in cycle all
-            closed = HashSet::new();
-            block = HashMap::new();
+            closed = HashSet::default();
+            block = HashMap::default();
             stack = vec![(
                 self.start_node,
                 subgraph
                     .neighbors(self.start_node)
-                    .collect::<IndexSet<NodeIndex, ahash::RandomState>>(),
+                    .collect::<IndexSet<NodeIndex>>(),
             )];
             if let Some(res) = process_stack::<G>(
                 self.start_node,

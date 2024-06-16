@@ -25,8 +25,8 @@ struct DependencyInfo<Edge, Error> {
 
 #[derive(Debug)]
 pub struct DependencyGraphWithErrors<Edge, Error> {
-    dependency_graph: DependencyGraph<Edge>,
-    errors_by_path: HashMap<Arc<Path>, Error>,
+    pub dependency_graph: DependencyGraph<Edge>,
+    pub errors_by_path: HashMap<Arc<Path>, Error>,
 }
 
 pub fn collect_dependencies<D: DiscoverDependency>(
@@ -72,7 +72,7 @@ pub fn collect_dependencies<D: DiscoverDependency>(
                         remaining = remaining.checked_add(1).unwrap();
                         work_cx.send(dep_path).unwrap()
                     }
-                    dep_graph.insert_edge(from_index, to_index, edge);
+                    dep_graph.add_edge(from_index, to_index, edge);
                 }
                 if let Some(error) = error {
                     assert!(errors_by_path.insert(path, error).is_none());

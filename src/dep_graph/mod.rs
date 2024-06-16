@@ -57,14 +57,13 @@ impl<E> DependencyGraph<E> {
             });
         (node_index, newly_inserted)
     }
-    pub fn insert_edge(&mut self, from: NodeIndex, to: NodeIndex, edge: E) {
+    pub fn add_edge(&mut self, from: NodeIndex, to: NodeIndex, edge: E) {
         self.path_graph.add_edge(from, to, edge);
     }
 
-    // pub fn find_cycles<'a>(
-    //     &'a self,
-    // ) -> impl Iterator<Item = impl Iterator<Item = (&'a Arc<Path>, &'a E)>> {
-    //     let cycles = find_simple_cycles(&self.path_graph);
-    //     cycles.map(|cycle| cycle.windows(2).map(|window| {}))
-    // }
+    // To do: return edges (source span) along with paths
+    pub fn find_cycles<'a>(&'a self) -> impl Iterator<Item = impl Iterator<Item = &'a Arc<Path>>> {
+        let cycles = find_simple_cycles(&self.path_graph);
+        cycles.map(|cycle| cycle.into_iter().map(|index| &self.path_graph[index]))
+    }
 }

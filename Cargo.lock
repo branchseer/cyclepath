@@ -130,7 +130,6 @@ dependencies = [
 name = "decycle"
 version = "0.1.0"
 dependencies = [
- "ahash",
  "bumpalo",
  "derive-where",
  "dunce",

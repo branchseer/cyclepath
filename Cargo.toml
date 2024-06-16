@@ -4,7 +4,6 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-ahash = "0.8.11"
 bumpalo = { version = "3.16.0", features = ["allocator-api2"] }
 derive-where = "1.2.7"
 dunce = "1.0.4"

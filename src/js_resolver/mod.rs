@@ -1,8 +1,9 @@
 mod parse_imports;
 use std::{
     cell::RefCell,
+    ffi::OsStr,
     io,
-    path::{Component, Path, PathBuf},
+    path::{Component, Path},
     sync::Arc,
 };
 
@@ -11,13 +12,14 @@ use hashbrown::{hash_map::DefaultHashBuilder, HashMap};
 use oxc_allocator::Allocator;
 use oxc_diagnostics::OxcDiagnostic;
 use oxc_resolver::{FileSystem, ResolveOptions, ResolverGeneric};
-use oxc_span::Span;
+use oxc_span::{SourceType, Span};
 use smallvec::SmallVec;
 
 use crate::collect_deps::DiscoverDependency;
 use parse_imports::{parse_imports, Imports};
 use thread_local::ThreadLocal;
 
+#[derive(Debug)]
 pub enum JsDiscoverDependencyError {
     FileReadError(io::Error),
     ParseOrResolveError {
@@ -76,7 +78,12 @@ impl<FS: FileSystem> DiscoverDependency for JsDiscoverDependency<FS> {
                 non_literal_imports,
             },
             parse_errors,
-        ) = parse_imports(allocator, &file_content);
+        ) = parse_imports(
+            allocator,
+            SourceType::from_path(file_path)
+                .unwrap_or_else(|_| SourceType::default().with_jsx(true).with_module(true)),
+            &file_content,
+        );
 
         let mut spans_by_dep =
             HashMap::<Arc<Path>, SmallVec<[Span; 1]>, DefaultHashBuilder, &Bump>::with_capacity_in(
@@ -101,8 +108,15 @@ impl<FS: FileSystem> DiscoverDependency for JsDiscoverDependency<FS> {
                     continue;
                 }
             };
+            let resolved_path = resolution.into_path_buf();
+            if !matches!(
+                resolved_path.extension().and_then(OsStr::to_str),
+                Some("js" | "ts" | "jsx" | "tsx")
+            ) {
+                continue;
+            }
             spans_by_dep
-                .entry(resolution.into_path_buf().into())
+                .entry(resolved_path.into())
                 .or_default()
                 .push(span);
         }

@@ -360,4 +360,13 @@ mod test_johnson_simple_cycles {
         let cycles = find_simple_cycles(graph);
         assert_eq!(cycles.count(), 3 * k as usize);
     }
+
+    // #[test]
+    // fn test_issue() {
+    //     let graph =
+    //         Graph::<(), ()>::from_edges([(0, 1), (1, 2), (1, 3), (2, 0), (2, 3), (3, 0), (3, 2)]);
+    //     for cycle in find_simple_cycles(&graph) {
+    //         dbg!(cycle);
+    //     }
+    // }
 }

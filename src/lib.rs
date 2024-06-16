@@ -4,8 +4,8 @@ mod hash;
 mod johnson_simple_cycles;
 mod js_resolver;
 
-use collect_deps::collect_dependencies;
-use js_resolver::JsDiscoverDependency;
+pub use collect_deps::collect_dependencies;
+pub use js_resolver::JsDiscoverDependency;
 use oxc_resolver::{FileMetadata, FileSystem, ResolveOptions, ResolverGeneric};
 
 use rayon::iter::{ParallelBridge, ParallelIterator};

@@ -16,17 +16,10 @@ pub struct Imports<'a> {
 
 pub fn parse_imports<'a>(
     allocator: &'a Allocator,
+    source_type: SourceType,
     source: &'a str,
 ) -> (Imports<'a>, Vec<OxcDiagnostic>) {
-    let parser = Parser::new(
-        allocator,
-        source,
-        SourceType::default()
-            .with_always_strict(true)
-            .with_typescript(true)
-            .with_jsx(true)
-            .with_module(true),
-    );
+    let parser = Parser::new(allocator, source, source_type);
     let parse_return = parser.parse();
     if parse_return.panicked {
         return (Default::default(), parse_return.errors);
@@ -38,8 +31,26 @@ pub fn parse_imports<'a>(
         non_literal_imports: Vec<Span>,
     }
     impl<'a> Visit<'a> for ImportsVisitor<'a> {
+        fn visit_export_all_declaration(&mut self, decl: &oxc_ast::ast::ExportAllDeclaration<'a>) {
+            if decl.export_kind.is_type() {
+                return;
+            }
+            self.specifiers
+                .push((decl.source.value.as_str(), decl.source.span))
+        }
+        fn visit_export_named_declaration(
+            &mut self,
+            decl: &oxc_ast::ast::ExportNamedDeclaration<'a>,
+        ) {
+            if decl.export_kind.is_type() {
+                return;
+            }
+            if let Some(source) = &decl.source {
+                self.specifiers.push((source.value.as_str(), source.span))
+            }
+        }
         fn visit_import_declaration(&mut self, decl: &oxc_ast::ast::ImportDeclaration<'a>) {
-            if decl.import_kind == ImportOrExportKind::Type {
+            if decl.import_kind.is_type() {
                 return;
             };
             self.specifiers
@@ -104,6 +115,7 @@ mod tests {
 
     use super::parse_imports;
     use oxc_allocator::Allocator;
+    use oxc_span::SourceType;
 
     // fn collect_deps(src: &str) -> Result<(Vec<String>, Vec<Span>), Vec<OxcDiagnostic>> {
     //     let mut deps: Vec<String> = vec![];
@@ -129,7 +141,7 @@ const e = import('e' + d);
 const f = require('f');
 const g = require('g' + f);
 ";
-        let imports = parse_imports(&allocator, src).0;
+        let imports = parse_imports(&allocator, SourceType::default().with_module(true), src).0;
         assert_eq!(
             imports
                 .specifiers

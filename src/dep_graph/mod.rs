@@ -1,7 +1,7 @@
 use derive_where::derive_where;
 use std::{ops::Deref, path::Path, sync::Arc};
 
-use crate::{hash::HashMap, johnson_simple_cycles::find_simple_cycles};
+use crate::{algorithms::johnson_simple_cycles::find_simple_cycles, hash::HashMap};
 use petgraph::stable_graph::{NodeIndex, StableDiGraph};
 
 #[derive(Debug)]

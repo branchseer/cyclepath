@@ -1,7 +1,7 @@
+mod algorithms;
 mod collect_deps;
 mod dep_graph;
 mod hash;
-mod johnson_simple_cycles;
 mod js_resolver;
 
 pub use collect_deps::collect_dependencies;

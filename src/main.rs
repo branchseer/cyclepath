@@ -17,13 +17,17 @@ fn main() {
     );
     eprintln!("Scanning");
     let graph = collect_dependencies(
-        ["main.js"]
+        ["/Users/patr0nus/code/webpack/lib/index.js"]
             .into_iter()
             .map(|path| Arc::from(Path::new(path))),
         &js_discover_dependency,
     );
 
-    // dbg!(graph.errors_by_path);
+    dbg!(
+        graph.dependency_graph.path_graph().node_count(),
+        graph.dependency_graph.path_graph().edge_count()
+    );
+    dbg!(graph.errors_by_path);
     eprintln!("Finding cycles");
 
     let cycles = graph.dependency_graph.find_cycles();
@@ -31,16 +35,18 @@ fn main() {
     let mut cycle_set = FxHashSet::<VecDeque<&Path>>::default();
     for c in cycles {
         n += 1;
-        let mut cycle = c.map(|path| path.deref()).collect::<VecDeque<&Path>>();
-        move_min_to_first(&mut cycle);
-        if !cycle_set.insert(cycle.clone()) {
-            println!("repeat!! {:?}", cycle);
-            break;
-        }
-        if n % 100000 == 0 || n % 100000 == 1 {
-            println!("{n} {cycle:?}")
+        let mut cycle = c
+            .map(|path| {
+                path.deref()
+                // .strip_prefix("/Users/patr0nus/code/webpack")
+                // .unwrap()
+            })
+            .collect::<VecDeque<&Path>>();
+        if n % 10000 == 0 {
+            dbg!(cycle);
         }
     }
+    println!("{n}");
 }
 
 fn move_min_to_first<T: Ord>(deque: &mut VecDeque<T>) {

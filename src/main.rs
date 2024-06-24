@@ -1,10 +1,17 @@
-use std::{collections::VecDeque, ops::Deref, path::Path, sync::Arc};
+use std::{ops::Deref, path::Path, sync::Arc};
 
-use decycle::{collect_dependencies, JsDiscoverDependency, OsFileSystem};
+use decycle::{
+    algorithms::johnson_simple_cycles::find_simple_cycles, algorithms::path_edges::TraversalSpace,
+    collect_dependencies, hash::HashSet, JsDiscoverDependency, OsFileSystem,
+};
+
+use camino::{FromPathError, Utf8Path};
 use oxc_resolver::ResolveOptions;
-use rustc_hash::FxHashSet;
 
 fn main() {
+    let args = std::env::args().collect::<Vec<String>>();
+    let entry = &args[1];
+    let cwd = std::env::current_dir().unwrap();
     let js_discover_dependency = JsDiscoverDependency::new(
         OsFileSystem::default(),
         ResolveOptions {
@@ -17,51 +24,40 @@ fn main() {
     );
     eprintln!("Scanning");
     let graph = collect_dependencies(
-        ["/Users/patr0nus/code/webpack/lib/index.js"]
+        std::env::current_dir().unwrap().as_path(),
+        [entry.as_str()]
             .into_iter()
             .map(|path| Arc::from(Path::new(path))),
         &js_discover_dependency,
     );
 
-    dbg!(
-        graph.dependency_graph.path_graph().node_count(),
-        graph.dependency_graph.path_graph().edge_count()
-    );
+    let path_graph = graph.dependency_graph.path_graph();
+
+    dbg!(path_graph.node_count(), path_graph.edge_count());
     dbg!(graph.errors_by_path);
-    eprintln!("Finding cycles");
+    eprintln!("Finding cycle edges");
 
-    let cycles = graph.dependency_graph.find_cycles();
-    let mut n = 0;
-    let mut cycle_set = FxHashSet::<VecDeque<&Path>>::default();
-    for c in cycles {
-        n += 1;
-        let mut cycle = c
-            .map(|path| {
-                path.deref()
-                // .strip_prefix("/Users/patr0nus/code/webpack")
-                // .unwrap()
-            })
-            .collect::<VecDeque<&Path>>();
-        if n % 10000 == 0 {
-            dbg!(cycle);
-        }
-    }
-    println!("{n}");
-}
-
-fn move_min_to_first<T: Ord>(deque: &mut VecDeque<T>) {
-    let mut min_pos = 0;
-    for i in 1..deque.len() {
-        if deque[i] < deque[min_pos] {
-            min_pos = i;
-        }
-    }
-    deque.rotate_left(min_pos);
-}
-
-#[test]
-fn test_move_min_to_first() {
-    let mut d = VecDeque::from(vec![4, 3, 1, 2]);
-    move_min_to_first(&mut d);
-    assert_eq!(d.make_contiguous(), &[1, 2, 4, 3]);
+    let mut space = TraversalSpace::new(path_graph);
+    let edges_in_cycles = space.find_edges_in_cycles();
+    let mut endpoints = edges_in_cycles
+        .into_iter()
+        .map(|edge_id| -> Result<(&Utf8Path, &Utf8Path), FromPathError> {
+            let (from_id, to_id) = path_graph.edge_endpoints(edge_id).unwrap();
+            let from_path = path_graph[from_id].deref();
+            let to_path = path_graph[to_id].deref();
+            Ok((from_path.try_into()?, to_path.try_into()?))
+        })
+        .collect::<Result<Vec<_>, FromPathError>>()
+        .unwrap();
+    endpoints.sort_unstable();
+    serde_json::to_writer_pretty(
+        std::fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open("./cyclepath-snapshot.json")
+            .unwrap(),
+        &endpoints,
+    )
+    .unwrap();
 }

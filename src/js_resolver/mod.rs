@@ -3,7 +3,7 @@ use std::{
     cell::RefCell,
     ffi::OsStr,
     io,
-    path::{Component, Path},
+    path::{Component, Path, PathBuf},
     sync::Arc,
 };
 
@@ -59,7 +59,7 @@ impl<FS: FileSystem> DiscoverDependency for JsDiscoverDependency<FS> {
     fn discover_dependencies(
         &self,
         file_path: &Path,
-    ) -> (Vec<(Arc<Path>, Self::Edge)>, Option<Self::Error>) {
+    ) -> (Vec<(PathBuf, Self::Edge)>, Option<Self::Error>) {
         let file_content = match self.fs.read_to_string(file_path) {
             Ok(ok) => ok,
             Err(err) => {
@@ -86,7 +86,7 @@ impl<FS: FileSystem> DiscoverDependency for JsDiscoverDependency<FS> {
         );
 
         let mut spans_by_dep =
-            HashMap::<Arc<Path>, SmallVec<[Span; 1]>, DefaultHashBuilder, &Bump>::with_capacity_in(
+            HashMap::<PathBuf, SmallVec<[Span; 1]>, DefaultHashBuilder, &Bump>::with_capacity_in(
                 specifiers.len(),
                 allocator,
             );
@@ -115,10 +115,7 @@ impl<FS: FileSystem> DiscoverDependency for JsDiscoverDependency<FS> {
             ) {
                 continue;
             }
-            spans_by_dep
-                .entry(resolved_path.into())
-                .or_default()
-                .push(span);
+            spans_by_dep.entry(resolved_path).or_default().push(span);
         }
 
         let error = if parse_errors.is_empty()

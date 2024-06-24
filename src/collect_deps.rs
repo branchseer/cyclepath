@@ -1,5 +1,5 @@
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{mpsc, Arc},
 };
 
@@ -14,12 +14,12 @@ pub trait DiscoverDependency: Send + Sync {
     fn discover_dependencies(
         &self,
         path: &Path,
-    ) -> (Vec<(Arc<Path>, Self::Edge)>, Option<Self::Error>);
+    ) -> (Vec<(PathBuf, Self::Edge)>, Option<Self::Error>);
 }
 
 struct DependencyInfo<Edge, Error> {
-    path: Arc<Path>,
-    dependencies: Vec<(Arc<Path>, Edge)>,
+    path: PathBuf,
+    dependencies: Vec<(PathBuf, Edge)>,
     error: Option<Error>,
 }
 
@@ -30,15 +30,18 @@ pub struct DependencyGraphWithErrors<Edge, Error> {
 }
 
 pub fn collect_dependencies<D: DiscoverDependency>(
-    paths: impl Iterator<Item = Arc<Path>>,
+    base_path: &Path,
+    paths: impl Iterator<Item = impl AsRef<Path>>,
     dep_discoverer: &D,
 ) -> DependencyGraphWithErrors<D::Edge, D::Error> {
+    assert!(base_path.is_absolute());
+
     let (deps_cx, deps_rx) = mpsc::channel::<DependencyInfo<D::Edge, D::Error>>();
-    let (work_cx, work_rx) = mpsc::channel::<Arc<Path>>();
+    let (work_cx, work_rx) = mpsc::channel::<PathBuf>();
 
     let mut remaining = 0u32;
     for path in paths {
-        work_cx.send(path).unwrap();
+        work_cx.send(base_path.join(path).into()).unwrap();
         remaining += 1;
     }
 
@@ -65,9 +68,14 @@ pub fn collect_dependencies<D: DiscoverDependency>(
             } in deps_rx
             {
                 remaining = remaining.checked_sub(1).unwrap();
-                let (from_index, _) = dep_graph.get_path_index_or_insert(&path);
+                let relative_path =
+                    Arc::<Path>::from(pathdiff::diff_paths(&path, base_path).unwrap());
+                let (from_index, _) = dep_graph.get_path_index_or_insert(&relative_path);
                 for (dep_path, edge) in dependencies {
-                    let (to_index, newly_inserted) = dep_graph.get_path_index_or_insert(&dep_path);
+                    let relative_dep_path =
+                        Arc::<Path>::from(pathdiff::diff_paths(&dep_path, base_path).unwrap());
+                    let (to_index, newly_inserted) =
+                        dep_graph.get_path_index_or_insert(&relative_dep_path);
                     if newly_inserted {
                         remaining = remaining.checked_add(1).unwrap();
                         work_cx.send(dep_path).unwrap()
@@ -75,7 +83,7 @@ pub fn collect_dependencies<D: DiscoverDependency>(
                     dep_graph.add_edge(from_index, to_index, edge);
                 }
                 if let Some(error) = error {
-                    assert!(errors_by_path.insert(path, error).is_none());
+                    assert!(errors_by_path.insert(relative_path, error).is_none());
                 }
                 if remaining == 0 {
                     break;
@@ -106,11 +114,11 @@ mod tests {
         fn discover_dependencies(
             &self,
             path: &Path,
-        ) -> (Vec<(Arc<Path>, Self::Edge)>, Option<Self::Error>) {
+        ) -> (Vec<(PathBuf, Self::Edge)>, Option<Self::Error>) {
             let (deps, err) = &self.0[path];
             (
                 deps.into_iter()
-                    .map(|(dep_path, edge)| (Arc::from(*dep_path), *edge))
+                    .map(|(dep_path, edge)| (dep_path.to_path_buf(), *edge))
                     .collect(),
                 *err,
             )
@@ -126,14 +134,18 @@ mod tests {
     fn test_collect_dependencies() {
         let test_discover_dep = TestDiscoverDependency({
             let mut map = HashMap::default();
-            map.insert(p(""), (vec![], None));
-            map.insert(p("a"), (vec![(p("b"), "a-b")], Some("a error")));
-            map.insert(p("b"), (vec![(p("c"), "b-c"), (p("d"), "b-d")], None));
-            map.insert(p("c"), (vec![], Some("c error")));
-            map.insert(p("d"), (vec![(p("a"), "d-a"), (p("d"), "d-d")], None));
+            map.insert(p("/x"), (vec![], None));
+            map.insert(p("/a"), (vec![(p("/b"), "a-b")], Some("a error")));
+            map.insert(p("/b"), (vec![(p("/c"), "b-c"), (p("/d"), "b-d")], None));
+            map.insert(p("/c"), (vec![], Some("c error")));
+            map.insert(p("/d"), (vec![(p("/a"), "d-a"), (p("/d"), "d-d")], None));
             map
         });
-        let result = collect_dependencies([ap(""), ap("a")].into_iter(), &test_discover_dep);
+        let result = collect_dependencies(
+            "/".as_ref(),
+            [ap("x"), ap("a")].into_iter(),
+            &test_discover_dep,
+        );
 
         assert_eq!(result.errors_by_path[p("a")], "a error");
         assert_eq!(result.errors_by_path[p("c")], "c error");
@@ -144,7 +156,7 @@ mod tests {
         let actual_paths = result.dependency_graph.paths().collect::<HashSet<_>>();
         assert_eq!(
             actual_paths,
-            [p(""), p("a"), p("b"), p("c"), p("d")]
+            [p("x"), p("a"), p("b"), p("c"), p("d")]
                 .into_iter()
                 .collect()
         );

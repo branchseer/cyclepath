@@ -1,13 +1,14 @@
-mod algorithms;
+pub mod algorithms;
 mod collect_deps;
 mod dep_graph;
-mod hash;
+pub mod hash;
 mod js_resolver;
 
 pub use collect_deps::collect_dependencies;
 pub use js_resolver::JsDiscoverDependency;
 use oxc_resolver::{FileMetadata, FileSystem, ResolveOptions, ResolverGeneric};
 
+use clap::Parser;
 use rayon::iter::{ParallelBridge, ParallelIterator};
 use std::{
     io,
@@ -36,16 +37,5 @@ impl FileSystem for OsFileSystem {
     }
 }
 
-pub fn get_circles<FS: FileSystem + Clone>(fs: FS, entries: impl Iterator<Item = Arc<Path>>) {
-    let js_discover_dependency = JsDiscoverDependency::new(
-        fs,
-        ResolveOptions {
-            extensions: [".js", ".jsx", ".ts", ".tsx", ".node"]
-                .into_iter()
-                .map(String::from)
-                .collect(),
-            ..Default::default()
-        },
-    );
-    let result = collect_dependencies(entries, &js_discover_dependency);
-}
+#[doc(hidden)]
+pub fn run(args: &[&str], cwd: &Path) {}
